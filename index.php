@@ -1,80 +1,37 @@
 <?php
+session_start();
+
 if (!file_exists('followers')) {
     mkdir('followers', 0777, true);
 }
 
 $response = ['success' => false, 'message' => ''];
+$page = 'login';
 
-function cleanupOldFiles()
-{
-    $files = glob('followers/followers_*.json');
-    rsort($files);
-    foreach (array_slice($files, 2) as $file) {
-        unlink($file);
-    }
+// Handle logout
+if (isset($_GET['logout'])) {
+    session_destroy();
+    header('Location: ' . $_SERVER['PHP_SELF']);
+    exit;
 }
 
-function getLastCount()
-{
-    $files = glob('followers/followers_*.json');
-    if (empty($files)) return ['count' => 0, 'timestamp' => null];
-    rsort($files);
-    $data = json_decode(file_get_contents($files[0]), true);
-
-    // Extract timestamp from filename
-    preg_match('/followers_(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/', basename($files[0]), $matches);
-    if ($matches) {
-        $timestamp = sprintf(
-            "%s/%s/%s %s:%s",
-            $matches[3],
-            $matches[2],
-            $matches[1],
-            $matches[4],
-            $matches[5]
-        );
-    } else {
-        $timestamp = 'Unknown';
-    }
-
-    return ['count' => count($data), 'timestamp' => $timestamp];
-}
-
-function getLastComparison()
-{
-    $files = glob('followers/followers_*.json');
-    if (count($files) < 2) return null;
-
-    rsort($files);
-    $currentData = json_decode(file_get_contents($files[0]), true);
-    $previousData = json_decode(file_get_contents($files[1]), true);
-
-    $currentFollowers = array_map(function ($item) {
-        return $item['string_list_data'][0]['value'];
-    }, $currentData);
-
-    $previousFollowers = array_map(function ($item) {
-        return $item['string_list_data'][0]['value'];
-    }, $previousData);
-
-    return [
-        'unfollowed' => array_values(array_diff($previousFollowers, $currentFollowers)),
-        'new_followers' => array_values(array_diff($currentFollowers, $previousFollowers)),
-        'total_current' => count($currentFollowers),
-        'total_previous' => count($previousFollowers)
-    ];
-}
-
+// Handle login
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (isset($_FILES['jsonFile'])) {
+    if (isset($_POST['prefix'])) {
+        $_SESSION['user_prefix'] = preg_replace('/[^a-zA-Z0-9_-]/', '', $_POST['prefix']);
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit;
+    } elseif (isset($_FILES['jsonFile']) && isset($_SESSION['user_prefix'])) {
         $timestamp = date('Y-m-d_H-i-s');
-        $fileName = "followers/followers_$timestamp.json";
+        $prefix = $_SESSION['user_prefix'];
+        $fileName = "followers/{$prefix}_followers_$timestamp.json";
 
         if (move_uploaded_file($_FILES['jsonFile']['tmp_name'], $fileName)) {
-            cleanupOldFiles();
+            cleanupOldFiles($prefix);
             $response['success'] = true;
             $response['message'] = 'File uploaded successfully';
 
-            $files = glob('followers/followers_*.json');
+            $files = glob("followers/{$prefix}_followers_*.json");
             rsort($files);
             $currentData = json_decode(file_get_contents($files[0]), true);
             $response['current_count'] = count($currentData);
@@ -100,15 +57,78 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $response['message'] = 'Error uploading file';
         }
-    }
 
-    header('Content-Type: application/json');
-    echo json_encode($response);
-    exit;
+        header('Content-Type: application/json');
+        echo json_encode($response);
+        exit;
+    }
 }
 
-$lastCountData = getLastCount();
-$lastComparison = getLastComparison();
+// Check if user is logged in
+if (isset($_SESSION['user_prefix'])) {
+    $page = 'main';
+}
+
+function cleanupOldFiles($prefix)
+{
+    $files = glob("followers/{$prefix}_followers_*.json");
+    rsort($files);
+    foreach (array_slice($files, 2) as $file) {
+        unlink($file);
+    }
+}
+
+function getLastCount($prefix)
+{
+    $files = glob("followers/{$prefix}_followers_*.json");
+    if (empty($files)) return ['count' => 0, 'timestamp' => null];
+    rsort($files);
+    $data = json_decode(file_get_contents($files[0]), true);
+
+    preg_match('/followers_(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/', basename($files[0]), $matches);
+    if ($matches) {
+        $timestamp = sprintf(
+            "%s/%s/%s %s:%s",
+            $matches[3],
+            $matches[2],
+            $matches[1],
+            $matches[4],
+            $matches[5]
+        );
+    } else {
+        $timestamp = 'Unknown';
+    }
+
+    return ['count' => count($data), 'timestamp' => $timestamp];
+}
+
+function getLastComparison($prefix)
+{
+    $files = glob("followers/{$prefix}_followers_*.json");
+    if (count($files) < 2) return null;
+
+    rsort($files);
+    $currentData = json_decode(file_get_contents($files[0]), true);
+    $previousData = json_decode(file_get_contents($files[1]), true);
+
+    $currentFollowers = array_map(function ($item) {
+        return $item['string_list_data'][0]['value'];
+    }, $currentData);
+
+    $previousFollowers = array_map(function ($item) {
+        return $item['string_list_data'][0]['value'];
+    }, $previousData);
+
+    return [
+        'unfollowed' => array_values(array_diff($previousFollowers, $currentFollowers)),
+        'new_followers' => array_values(array_diff($currentFollowers, $previousFollowers)),
+        'total_current' => count($currentFollowers),
+        'total_previous' => count($previousFollowers)
+    ];
+}
+
+$lastCountData = isset($_SESSION['user_prefix']) ? getLastCount($_SESSION['user_prefix']) : ['count' => 0, 'timestamp' => null];
+$lastComparison = isset($_SESSION['user_prefix']) ? getLastComparison($_SESSION['user_prefix']) : null;
 ?>
 
 <!DOCTYPE html>
@@ -122,70 +142,100 @@ $lastComparison = getLastComparison();
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 
-<body class="bg-gray-100 min-h-screen p-8">
-    <div class="max-w-2xl mx-auto">
-        <div class="bg-white rounded-lg shadow-md p-6">
-            <h1 class="text-2xl font-bold mb-6">Instagram Followers Comparison</h1>
-
-            <div class="mb-4 p-4 bg-blue-50 rounded">
-                <h3 class="font-medium">
-                    Last Followers Count: <span class="text-blue-600" id="lastCount"><?php echo $lastCountData['count']; ?></span>
-                    <?php if ($lastCountData['timestamp']): ?>
-                        <div class="text-sm text-gray-600">Last checked: <?php echo $lastCountData['timestamp']; ?></div>
-                    <?php endif; ?>
-                </h3>
+<body class="bg-gray-100 min-h-screen">
+    <?php if ($page === 'login'): ?>
+        <!-- Login Page -->
+        <div class="min-h-screen flex items-center justify-center">
+            <div class="bg-white p-8 rounded-lg shadow-md w-96">
+                <h1 class="text-2xl font-bold mb-6">Login</h1>
+                <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>">
+                    <div class="mb-4">
+                        <label class="block text-gray-700 mb-2">Enter your identifier</label>
+                        <input type="text" name="prefix" required
+                            class="w-full p-2 border rounded"
+                            pattern="[a-zA-Z0-9_-]+"
+                            title="Only letters, numbers, underscores, and hyphens are allowed">
+                    </div>
+                    <button type="submit" class="w-full bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+                        Login
+                    </button>
+                </form>
             </div>
+        </div>
 
-            <form id="uploadForm" class="mb-6">
-                <div class="mb-4">
-                    <label class="block text-gray-700 mb-2">Upload <a style="text-decoration:underline" href="https://privacycenter.instagram.com/dyi/?entry_point=notification">Followers JSON</a></label>
-                    <input type="file" name="jsonFile" accept=".json" class="w-full p-2 border rounded">
-                </div>
-                <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
-                    Upload and Compare
-                </button>
-            </form>
+    <?php else: ?>
+        <!-- Main Application -->
+        <div class="p-8">
+            <div class="max-w-2xl mx-auto">
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <div class="flex justify-between items-center mb-6">
+                        <h1 class="text-2xl font-bold">Instagram Followers Comparison</h1>
+                        <a href="?logout=1" class="text-sm text-gray-600 hover:text-gray-900">
+                            Logout (<?php echo htmlspecialchars($_SESSION['user_prefix']); ?>)
+                        </a>
+                    </div>
 
-            <div id="results" class="<?php echo $lastComparison ? '' : 'hidden'; ?>">
-                <h2 class="text-xl font-semibold mb-4">Comparison Results</h2>
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="p-4 bg-gray-50 rounded">
-                        <h3 class="font-medium mb-2">New Followers</h3>
-                        <ul id="newFollowers" class="list-disc pl-4 text-green-600">
-                            <?php
-                            if ($lastComparison) {
-                                foreach ($lastComparison['new_followers'] as $follower) {
-                                    echo "<li>$follower</li>";
-                                }
-                            }
-                            ?>
-                        </ul>
+                    <div class="mb-4 p-4 bg-blue-50 rounded">
+                        <h3 class="font-medium">
+                            Last Followers Count: <span class="text-blue-600" id="lastCount"><?php echo $lastCountData['count']; ?></span>
+                            <?php if ($lastCountData['timestamp']): ?>
+                                <div class="text-sm text-gray-600">Last checked: <?php echo $lastCountData['timestamp']; ?></div>
+                            <?php endif; ?>
+                        </h3>
                     </div>
-                    <div class="p-4 bg-gray-50 rounded">
-                        <h3 class="font-medium mb-2">Unfollowed</h3>
-                        <ul id="unfollowed" class="list-disc pl-4 text-red-600">
-                            <?php
-                            if ($lastComparison) {
-                                foreach ($lastComparison['unfollowed'] as $follower) {
-                                    echo "<li>$follower</li>";
+
+                    <form id="uploadForm" class="mb-6">
+                        <div class="mb-4">
+                            <label class="block text-gray-700 mb-2">Upload <a style="text-decoration:underline" href="https://privacycenter.instagram.com/dyi/?entry_point=notification">Followers JSON</a></label>
+                            <input type="file" name="jsonFile" accept=".json" class="w-full p-2 border rounded">
+                        </div>
+                        <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+                            Upload and Compare
+                        </button>
+                    </form>
+
+                    <div id="results" class="<?php echo $lastComparison ? '' : 'hidden'; ?>">
+                        <h2 class="text-xl font-semibold mb-4">Comparison Results</h2>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="p-4 bg-gray-50 rounded">
+                                <h3 class="font-medium mb-2">New Followers</h3>
+                                <ul id="newFollowers" class="list-disc pl-4 text-green-600">
+                                    <?php
+                                    if ($lastComparison) {
+                                        foreach ($lastComparison['new_followers'] as $follower) {
+                                            echo "<li>" . htmlspecialchars($follower) . "</li>";
+                                        }
+                                    }
+                                    ?>
+                                </ul>
+                            </div>
+                            <div class="p-4 bg-gray-50 rounded">
+                                <h3 class="font-medium mb-2">Unfollowed</h3>
+                                <ul id="unfollowed" class="list-disc pl-4 text-red-600">
+                                    <?php
+                                    if ($lastComparison) {
+                                        foreach ($lastComparison['unfollowed'] as $follower) {
+                                            echo "<li>" . htmlspecialchars($follower) . "</li>";
+                                        }
+                                    }
+                                    ?>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="mt-4 text-sm text-gray-600">
+                            <p id="totalCounts">
+                                <?php
+                                if ($lastComparison) {
+                                    echo "Current followers: {$lastComparison['total_current']} | Previous followers: {$lastComparison['total_previous']}";
                                 }
-                            }
-                            ?>
-                        </ul>
+                                ?>
+                            </p>
+                        </div>
                     </div>
-                </div>
-                <div class="mt-4 text-sm text-gray-600">
-                    <p id="totalCounts">
-                        <?php
-                        if ($lastComparison) {
-                            echo "Current followers: {$lastComparison['total_current']} | Previous followers: {$lastComparison['total_previous']}";
-                        }
-                        ?>
-                    </p>
                 </div>
             </div>
         </div>
-    </div>
+    <?php endif; ?>
 
     <script>
         $(document).ready(function() {
@@ -204,7 +254,6 @@ $lastComparison = getLastComparison();
                     success: function(response) {
                         if (response.success) {
                             $('#lastCount').text(response.current_count);
-                            location.reload();
 
                             if (response.comparison) {
                                 $('#results').removeClass('hidden');
@@ -225,6 +274,8 @@ $lastComparison = getLastComparison();
                                 );
                             }
                             alert('File uploaded successfully');
+                            // Update the page URL to prevent resubmission
+                            window.history.replaceState({}, '', window.location.pathname);
                         } else {
                             alert('Error: ' + response.message);
                         }
