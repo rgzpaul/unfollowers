@@ -151,10 +151,7 @@ $lastComparison = isset($_SESSION['user_prefix']) ? getLastComparison($_SESSION[
                 <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>">
                     <div class="mb-4">
                         <label class="block text-gray-700 mb-2">Enter your identifier</label>
-                        <input type="text" name="prefix" required
-                            class="w-full p-2 border rounded"
-                            pattern="[a-zA-Z0-9_-]+"
-                            title="Only letters, numbers, underscores, and hyphens are allowed">
+                        <input type="text" name="prefix" required class="w-full p-2 border rounded" maxlength="5" pattern="[a-z]{1,5}" title="Only lowercase letters, maximum 5 characters" oninput="this.value = this.value.toLowerCase().slice(0, 5)">
                     </div>
                     <button type="submit" class="w-full bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
                         Login
